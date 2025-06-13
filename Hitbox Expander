@@ -1,0 +1,414 @@
+-- Load Rayfield UI with enhanced error handling
+local Rayfield = nil
+local success, err = pcall(function()
+    Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+end)
+
+if not success or not Rayfield then
+    warn("Failed to load Rayfield UI: " .. tostring(err))
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "UI Load Failed",
+        Text = "Failed to load Rayfield UI",
+        Duration = 5
+    })
+    return
+end
+
+-- Initial notification
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "Universal Hitbox Expander",
+    Text = "Made By Corygunzjr",
+    Duration = 5
+})
+
+-- UI Setup with configuration
+local Window = Rayfield:CreateWindow({
+    Name = "Universal Hitbox Expander",
+    LoadingTitle = "Loading HBE...",
+    LoadingSubtitle = "With Safe Zone + Death Fix",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "RayfieldHBE",
+        FileName = "HBEConfig"
+    },
+    Discord = { Enabled = false },
+    KeySystem = false
+})
+
+-- Create tabs
+local MainTab = Window:CreateTab("Hitbox Expander", 4483362458)
+local ConfigTab = Window:CreateTab("Configuration", 4483362458)
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+
+-- Configuration system
+local config = {
+    size = 5,
+    transparency = 0.5,
+    enabled = false
+}
+
+local savedConfigurations = {}
+local currentConfigName = "Default"
+
+-- Enhanced configuration functions
+local function LoadAllConfigs()
+    local success, data = pcall(function()
+        return Rayfield:GetConfiguration()
+    end)
+    
+    if success and data then
+        if data.configurations then
+            savedConfigurations = data.configurations
+        end
+        if data.currentConfig then
+            currentConfigName = data.currentConfig
+            if savedConfigurations[currentConfigName] then
+                config.size = savedConfigurations[currentConfigName].size or config.size
+                config.transparency = savedConfigurations[currentConfigName].transparency or config.transparency
+                config.enabled = savedConfigurations[currentConfigName].enabled or config.enabled
+            end
+        else
+            config.size = data.size or config.size
+            config.transparency = data.transparency or config.transparency
+            config.enabled = data.enabled or config.enabled
+        end
+    end
+end
+
+local function SaveAllConfigs()
+    local data = {
+        size = config.size,
+        transparency = config.transparency,
+        enabled = config.enabled,
+        configurations = savedConfigurations,
+        currentConfig = currentConfigName
+    }
+    
+    pcall(function()
+        Rayfield:SetConfiguration(data)
+    end)
+end
+
+local function SaveNamedConfig(name)
+    savedConfigurations[name] = {
+        size = config.size,
+        transparency = config.transparency,
+        enabled = config.enabled
+    }
+    currentConfigName = name
+    SaveAllConfigs()
+end
+
+local function DeleteConfig(name)
+    savedConfigurations[name] = nil
+    if currentConfigName == name then
+        currentConfigName = "Default"
+    end
+    SaveAllConfigs()
+end
+
+LoadAllConfigs()
+
+-- Safe Zone system
+local safeZones = {}
+
+local function loadSafeZones()
+    safeZones = {}
+    local zoneFolder = Workspace:FindFirstChild("SafeZones")
+    if zoneFolder then
+        for _, part in ipairs(zoneFolder:GetDescendants()) do
+            if part:IsA("BasePart") then
+                table.insert(safeZones, part)
+            end
+        end
+    end
+end
+
+local function isInSafeZone(player)
+    local char = player.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    for _, zone in ipairs(safeZones) do
+        local relPos = zone.CFrame:pointToObjectSpace(hrp.Position)
+        local halfSize = zone.Size / 2
+        if math.abs(relPos.X) <= halfSize.X and
+           math.abs(relPos.Y) <= halfSize.Y and
+           math.abs(relPos.Z) <= halfSize.Z then
+            return true
+        end
+    end
+    return false
+end
+
+-- Hitbox functions
+local function resetHead(player)
+    local char = player.Character
+    if char and char:FindFirstChild("Head") then
+        local head = char.Head
+        head.Size = Vector3.new(2, 1, 1)
+        head.Transparency = 0
+        head.CanCollide = true
+        head.Massless = false
+    end
+end
+
+local function applyHitbox(player)
+    if player == LocalPlayer then return end
+
+    local char = player.Character
+    if not char then return end
+
+    local head = char:FindFirstChild("Head")
+    local humanoid = char:FindFirstChild("Humanoid")
+
+    if not head or not humanoid or humanoid.Health <= 0 then
+        resetHead(player)
+        return
+    end
+
+    if not config.enabled or isInSafeZone(player) then
+        resetHead(player)
+        return
+    end
+
+    head.Size = Vector3.new(config.size, config.size, config.size)
+    head.Transparency = config.transparency
+    head.CanCollide = false
+    head.Massless = true
+end
+
+local function monitorCharacter(player)
+    if player == LocalPlayer then return end
+
+    player.CharacterAdded:Connect(function(char)
+        char:WaitForChild("Head", 5)
+        local hum = char:WaitForChild("Humanoid", 5)
+        task.wait(0.2)
+        applyHitbox(player)
+
+        if hum then
+            hum.Died:Connect(function()
+                resetHead(player)
+            end)
+        end
+
+        char.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                resetHead(player)
+            end
+        end)
+    end)
+
+    if player.Character then
+        task.delay(0.3, function()
+            applyHitbox(player)
+        end)
+    end
+end
+
+-- Initialize player monitoring
+for _, p in ipairs(Players:GetPlayers()) do
+    monitorCharacter(p)
+end
+Players.PlayerAdded:Connect(monitorCharacter)
+
+-- Main Tab UI Elements
+MainTab:CreateToggle({
+    Name = "Enable Hitbox Expander",
+    CurrentValue = config.enabled,
+    Flag = "HitboxToggle",
+    Callback = function(Value)
+        config.enabled = Value
+        SaveAllConfigs()
+        if not config.enabled then
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then
+                    resetHead(player)
+                end
+            end
+        else
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then
+                    applyHitbox(player)
+                end
+            end
+        end
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Head Size",
+    Range = {2, 200},
+    Increment = 1,
+    Suffix = "Size",
+    CurrentValue = config.size,
+    Flag = "SizeSlider",
+    Callback = function(Value)
+        config.size = Value
+        SaveAllConfigs()
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Transparency",
+    Range = {0, 1},
+    Increment = 0.05,
+    Suffix = "",
+    CurrentValue = config.transparency,
+    Flag = "TransparencySlider",
+    Callback = function(Value)
+        config.transparency = Value
+        SaveAllConfigs()
+    end,
+})
+
+-- Config Tab UI Elements
+local function updateConfigDropdown()
+    local options = {"Default"}
+    for name, _ in pairs(savedConfigurations) do
+        if name ~= "Default" then
+            table.insert(options, name)
+        end
+    end
+    table.sort(options)
+    Rayfield:ChangeDropdownOption("ConfigDropdown", options)
+    Rayfield:ChangeDropdownSelection("ConfigDropdown", currentConfigName)
+end
+
+ConfigTab:CreateDropdown({
+    Name = "Saved Configurations",
+    Options = {"Default"},
+    CurrentOption = "Default",
+    Flag = "ConfigDropdown",
+    Callback = function(Option)
+        if savedConfigurations[Option] then
+            config.size = savedConfigurations[Option].size
+            config.transparency = savedConfigurations[Option].transparency
+            config.enabled = savedConfigurations[Option].enabled
+            currentConfigName = Option
+            SaveAllConfigs()
+            
+            Rayfield:ChangeOption("HitboxToggle", config.enabled)
+            Rayfield:ChangeOption("SizeSlider", config.size)
+            Rayfield:ChangeOption("TransparencySlider", config.transparency)
+            
+            Rayfield:Notify({
+                Title = "Configuration Loaded",
+                Content = "Loaded configuration: " .. Option,
+                Duration = 3,
+                Image = 4483362458
+            })
+        end
+    end,
+})
+
+ConfigTab:CreateInput({
+    Name = "Save Current Config",
+    PlaceholderText = "Config Name",
+    RemoveTextAfterFocusLost = false,
+    Callback = function(Text)
+        if Text and Text ~= "" then
+            SaveNamedConfig(Text)
+            updateConfigDropdown()
+            Rayfield:Notify({
+                Title = "Configuration Saved",
+                Content = "Saved as: " .. Text,
+                Duration = 3,
+                Image = 4483362458
+            })
+        end
+    end,
+})
+
+ConfigTab:CreateButton({
+    Name = "Delete Current Config",
+    Callback = function()
+        if currentConfigName ~= "Default" then
+            DeleteConfig(currentConfigName)
+            updateConfigDropdown()
+            Rayfield:Notify({
+                Title = "Configuration Deleted",
+                Content = "Deleted: " .. currentConfigName,
+                Duration = 3,
+                Image = 4483362458
+            })
+        else
+            Rayfield:Notify({
+                Title = "Cannot Delete",
+                Content = "Cannot delete the Default configuration",
+                Duration = 3,
+                Image = 4483362458
+            })
+        end
+    end,
+})
+
+ConfigTab:CreateButton({
+    Name = "Reset to Default",
+    Callback = function()
+        config.size = 5
+        config.transparency = 0.5
+        config.enabled = false
+        currentConfigName = "Default"
+        SaveAllConfigs()
+        
+        Rayfield:ChangeOption("HitboxToggle", config.enabled)
+        Rayfield:ChangeOption("SizeSlider", config.size)
+        Rayfield:ChangeOption("TransparencySlider", config.transparency)
+        updateConfigDropdown()
+        
+        Rayfield:Notify({
+            Title = "Configuration Reset",
+            Content = "Reset to default settings",
+            Duration = 3,
+            Image = 4483362458
+        })
+    end,
+})
+
+-- Initialize dropdown
+updateConfigDropdown()
+
+-- Load safe zones
+loadSafeZones()
+
+-- Real-time monitoring
+RunService.Heartbeat:Connect(function()
+    if config.enabled then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                applyHitbox(player)
+            end
+        end
+    end
+end)
+
+-- Ensure UI visibility
+task.spawn(function()
+    wait(1)
+    if Rayfield then
+        Rayfield:ShowWindow()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Hitbox Expander",
+            Text = "Press Right Shift to toggle UI",
+            Duration = 5
+        })
+    end
+end)
+
+-- UI toggle binding
+game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+        if Rayfield then
+            Rayfield:ToggleWindow()
+        end
+    end
+end)
