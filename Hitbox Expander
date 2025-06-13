@@ -1,18 +1,8 @@
--- Load Rayfield UI with enhanced error handling
-local Rayfield = nil
-local success, err = pcall(function()
-    Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
-end)
+-- Universal Hitbox Expander by Corygunzjr
+-- Version 3.0 - With Team/Player Selection
 
-if not success or not Rayfield then
-    warn("Failed to load Rayfield UI: " .. tostring(err))
-    game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "UI Load Failed",
-        Text = "Failed to load Rayfield UI",
-        Duration = 5
-    })
-    return
-end
+-- Load Rayfield UI
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
 -- Initial notification
 game:GetService("StarterGui"):SetCore("SendNotification", {
@@ -21,11 +11,11 @@ game:GetService("StarterGui"):SetCore("SendNotification", {
     Duration = 5
 })
 
--- UI Setup with configuration
+-- UI Setup
 local Window = Rayfield:CreateWindow({
     Name = "Universal Hitbox Expander",
     LoadingTitle = "Loading HBE...",
-    LoadingSubtitle = "With Safe Zone + Death Fix",
+    LoadingSubtitle = "With Team/Player Selection",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "RayfieldHBE",
@@ -37,14 +27,14 @@ local Window = Rayfield:CreateWindow({
 
 -- Create tabs
 local MainTab = Window:CreateTab("Hitbox Expander", 4483362458)
-local ConfigTab = Window:CreateTab("Configuration", 4483362458)
+local FilterTab = Window:CreateTab("Filters", 4483362458) -- New tab for filters
 
 -- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Workspace = game:GetService("Workspace")
-local HttpService = game:GetService("HttpService")
+local Teams = game:GetService("Teams")
 
 -- Configuration system
 local config = {
@@ -53,115 +43,91 @@ local config = {
     enabled = false
 }
 
-local savedConfigurations = {}
-local currentConfigName = "Default"
+-- Filter system
+local filters = {
+    excludedPlayers = {},
+    excludedTeams = {},
+    forceIncludedPlayers = {} -- Players that should show hitbox even if their team is excluded
+}
 
--- Enhanced configuration functions
-local function LoadAllConfigs()
-    local success, data = pcall(function()
-        return Rayfield:GetConfiguration()
-    end)
-    
-    if success and data then
-        if data.configurations then
-            savedConfigurations = data.configurations
-        end
-        if data.currentConfig then
-            currentConfigName = data.currentConfig
-            if savedConfigurations[currentConfigName] then
-                config.size = savedConfigurations[currentConfigName].size or config.size
-                config.transparency = savedConfigurations[currentConfigName].transparency or config.transparency
-                config.enabled = savedConfigurations[currentConfigName].enabled or config.enabled
-            end
-        else
-            config.size = data.size or config.size
-            config.transparency = data.transparency or config.transparency
-            config.enabled = data.enabled or config.enabled
-        end
+-- Player monitoring
+local monitoredPlayers = {}
+
+-- Get all current teams
+local function getTeamList()
+    local teamList = {}
+    for _, team in ipairs(Teams:GetTeams()) do
+        table.insert(teamList, team.Name)
     end
+    return teamList
 end
 
-local function SaveAllConfigs()
-    local data = {
-        size = config.size,
-        transparency = config.transparency,
-        enabled = config.enabled,
-        configurations = savedConfigurations,
-        currentConfig = currentConfigName
-    }
-    
-    pcall(function()
-        Rayfield:SetConfiguration(data)
-    end)
-end
-
-local function SaveNamedConfig(name)
-    savedConfigurations[name] = {
-        size = config.size,
-        transparency = config.transparency,
-        enabled = config.enabled
-    }
-    currentConfigName = name
-    SaveAllConfigs()
-end
-
-local function DeleteConfig(name)
-    savedConfigurations[name] = nil
-    if currentConfigName == name then
-        currentConfigName = "Default"
-    end
-    SaveAllConfigs()
-end
-
-LoadAllConfigs()
-
--- Safe Zone system
-local safeZones = {}
-
-local function loadSafeZones()
-    safeZones = {}
-    local zoneFolder = Workspace:FindFirstChild("SafeZones")
-    if zoneFolder then
-        for _, part in ipairs(zoneFolder:GetDescendants()) do
-            if part:IsA("BasePart") then
-                table.insert(safeZones, part)
-            end
+-- Get all players (excluding local player)
+local function getPlayerList()
+    local playerList = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerList, player.Name)
         end
     end
+    return playerList
 end
 
-local function isInSafeZone(player)
-    local char = player.Character
-    if not char then return false end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-
-    for _, zone in ipairs(safeZones) do
-        local relPos = zone.CFrame:pointToObjectSpace(hrp.Position)
-        local halfSize = zone.Size / 2
-        if math.abs(relPos.X) <= halfSize.X and
-           math.abs(relPos.Y) <= halfSize.Y and
-           math.abs(relPos.Z) <= halfSize.Z then
-            return true
+-- Check if player should have hitbox
+local function shouldShowHitbox(player)
+    -- Always show for force included players
+    if filters.forceIncludedPlayers[player.Name] then
+        return true
+    end
+    
+    -- Check player exclusions
+    if filters.excludedPlayers[player.Name] then
+        return false
+    end
+    
+    -- Check team exclusions
+    if player.Team then
+        if filters.excludedTeams[player.Team.Name] then
+            return false
         end
     end
-    return false
+    
+    return true
 end
 
--- Hitbox functions
+-- Reset head to normal
 local function resetHead(player)
-    local char = player.Character
-    if char and char:FindFirstChild("Head") then
-        local head = char.Head
-        head.Size = Vector3.new(2, 1, 1)
-        head.Transparency = 0
-        head.CanCollide = true
-        head.Massless = false
+    if monitoredPlayers[player] then
+        local char = player.Character
+        if char and char:FindFirstChild("Head") then
+            local head = char.Head
+            head.Size = Vector3.new(2, 1, 1)
+            head.Transparency = 0
+            head.CanCollide = true
+            head.Massless = false
+        end
     end
 end
 
+-- Apply head hitbox
 local function applyHitbox(player)
     if player == LocalPlayer then return end
+    
+    -- Initialize monitoring if not already
+    if not monitoredPlayers[player] then
+        monitoredPlayers[player] = true
+        player.CharacterAdded:Connect(function(char)
+            char:WaitForChild("Head", 5)
+            task.wait(0.2)
+            applyHitbox(player)
+        end)
+        
+        if player.Character then
+            task.delay(0.3, function()
+                applyHitbox(player)
+            end)
+        end
+    end
 
     local char = player.Character
     if not char then return end
@@ -174,7 +140,7 @@ local function applyHitbox(player)
         return
     end
 
-    if not config.enabled or isInSafeZone(player) then
+    if not config.enabled or not shouldShowHitbox(player) then
         resetHead(player)
         return
     end
@@ -185,40 +151,12 @@ local function applyHitbox(player)
     head.Massless = true
 end
 
-local function monitorCharacter(player)
-    if player == LocalPlayer then return end
-
-    player.CharacterAdded:Connect(function(char)
-        char:WaitForChild("Head", 5)
-        local hum = char:WaitForChild("Humanoid", 5)
-        task.wait(0.2)
+-- Update all hitboxes
+local function updateAllHitboxes()
+    for player, _ in pairs(monitoredPlayers) do
         applyHitbox(player)
-
-        if hum then
-            hum.Died:Connect(function()
-                resetHead(player)
-            end)
-        end
-
-        char.AncestryChanged:Connect(function(_, parent)
-            if not parent then
-                resetHead(player)
-            end
-        end)
-    end)
-
-    if player.Character then
-        task.delay(0.3, function()
-            applyHitbox(player)
-        end)
     end
 end
-
--- Initialize player monitoring
-for _, p in ipairs(Players:GetPlayers()) do
-    monitorCharacter(p)
-end
-Players.PlayerAdded:Connect(monitorCharacter)
 
 -- Main Tab UI Elements
 MainTab:CreateToggle({
@@ -227,20 +165,7 @@ MainTab:CreateToggle({
     Flag = "HitboxToggle",
     Callback = function(Value)
         config.enabled = Value
-        SaveAllConfigs()
-        if not config.enabled then
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer then
-                    resetHead(player)
-                end
-            end
-        else
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer then
-                    applyHitbox(player)
-                end
-            end
-        end
+        updateAllHitboxes()
     end,
 })
 
@@ -253,7 +178,7 @@ MainTab:CreateSlider({
     Flag = "SizeSlider",
     Callback = function(Value)
         config.size = Value
-        SaveAllConfigs()
+        updateAllHitboxes()
     end,
 })
 
@@ -266,127 +191,120 @@ MainTab:CreateSlider({
     Flag = "TransparencySlider",
     Callback = function(Value)
         config.transparency = Value
-        SaveAllConfigs()
+        updateAllHitboxes()
     end,
 })
 
--- Config Tab UI Elements
-local function updateConfigDropdown()
-    local options = {"Default"}
-    for name, _ in pairs(savedConfigurations) do
-        if name ~= "Default" then
-            table.insert(options, name)
+-- Filter Tab UI Elements
+local playerDropdown = FilterTab:CreateDropdown({
+    Name = "Exclude Players",
+    Options = getPlayerList(),
+    CurrentOption = "",
+    MultipleOptions = true,
+    Flag = "PlayerFilterDropdown",
+    Callback = function(Selected)
+        -- Clear all player exclusions
+        for playerName, _ in pairs(filters.excludedPlayers) do
+            filters.excludedPlayers[playerName] = nil
         end
+        
+        -- Set new exclusions
+        for _, playerName in ipairs(Selected) do
+            filters.excludedPlayers[playerName] = true
+        end
+        
+        updateAllHitboxes()
+    end,
+})
+
+local teamDropdown = FilterTab:CreateDropdown({
+    Name = "Exclude Teams",
+    Options = getTeamList(),
+    CurrentOption = "",
+    MultipleOptions = true,
+    Flag = "TeamFilterDropdown",
+    Callback = function(Selected)
+        -- Clear all team exclusions
+        for teamName, _ in pairs(filters.excludedTeams) do
+            filters.excludedTeams[teamName] = nil
+        end
+        
+        -- Set new exclusions
+        for _, teamName in ipairs(Selected) do
+            filters.excludedTeams[teamName] = true
+        end
+        
+        updateAllHitboxes()
+    end,
+})
+
+local forceIncludeDropdown = FilterTab:CreateDropdown({
+    Name = "Force Include Players",
+    Options = getPlayerList(),
+    CurrentOption = "",
+    MultipleOptions = true,
+    Flag = "ForceIncludeDropdown",
+    Callback = function(Selected)
+        -- Clear all force includes
+        for playerName, _ in pairs(filters.forceIncludedPlayers) do
+            filters.forceIncludedPlayers[playerName] = nil
+        end
+        
+        -- Set new force includes
+        for _, playerName in ipairs(Selected) do
+            filters.forceIncludedPlayers[playerName] = true
+        end
+        
+        updateAllHitboxes()
+    end,
+})
+
+-- Update dropdowns when players/teams change
+Players.PlayerAdded:Connect(function()
+    playerDropdown:Refresh(getPlayerList(), true)
+    forceIncludeDropdown:Refresh(getPlayerList(), true)
+end)
+
+Players.PlayerRemoving:Connect(function()
+    playerDropdown:Refresh(getPlayerList(), true)
+    forceIncludeDropdown:Refresh(getPlayerList(), true)
+end)
+
+Teams.ChildAdded:Connect(function()
+    teamDropdown:Refresh(getTeamList(), true)
+end)
+
+Teams.ChildRemoved:Connect(function()
+    teamDropdown:Refresh(getTeamList(), true)
+end)
+
+-- Initialize monitoring for all players
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        applyHitbox(player)
     end
-    table.sort(options)
-    Rayfield:ChangeDropdownOption("ConfigDropdown", options)
-    Rayfield:ChangeDropdownSelection("ConfigDropdown", currentConfigName)
 end
 
-ConfigTab:CreateDropdown({
-    Name = "Saved Configurations",
-    Options = {"Default"},
-    CurrentOption = "Default",
-    Flag = "ConfigDropdown",
-    Callback = function(Option)
-        if savedConfigurations[Option] then
-            config.size = savedConfigurations[Option].size
-            config.transparency = savedConfigurations[Option].transparency
-            config.enabled = savedConfigurations[Option].enabled
-            currentConfigName = Option
-            SaveAllConfigs()
-            
-            Rayfield:ChangeOption("HitboxToggle", config.enabled)
-            Rayfield:ChangeOption("SizeSlider", config.size)
-            Rayfield:ChangeOption("TransparencySlider", config.transparency)
-            
-            Rayfield:Notify({
-                Title = "Configuration Loaded",
-                Content = "Loaded configuration: " .. Option,
-                Duration = 3,
-                Image = 4483362458
-            })
-        end
-    end,
-})
+-- Monitor new players
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        applyHitbox(player)
+    end
+end)
 
-ConfigTab:CreateInput({
-    Name = "Save Current Config",
-    PlaceholderText = "Config Name",
-    RemoveTextAfterFocusLost = false,
-    Callback = function(Text)
-        if Text and Text ~= "" then
-            SaveNamedConfig(Text)
-            updateConfigDropdown()
-            Rayfield:Notify({
-                Title = "Configuration Saved",
-                Content = "Saved as: " .. Text,
-                Duration = 3,
-                Image = 4483362458
-            })
-        end
-    end,
-})
-
-ConfigTab:CreateButton({
-    Name = "Delete Current Config",
-    Callback = function()
-        if currentConfigName ~= "Default" then
-            DeleteConfig(currentConfigName)
-            updateConfigDropdown()
-            Rayfield:Notify({
-                Title = "Configuration Deleted",
-                Content = "Deleted: " .. currentConfigName,
-                Duration = 3,
-                Image = 4483362458
-            })
-        else
-            Rayfield:Notify({
-                Title = "Cannot Delete",
-                Content = "Cannot delete the Default configuration",
-                Duration = 3,
-                Image = 4483362458
-            })
-        end
-    end,
-})
-
-ConfigTab:CreateButton({
-    Name = "Reset to Default",
-    Callback = function()
-        config.size = 5
-        config.transparency = 0.5
-        config.enabled = false
-        currentConfigName = "Default"
-        SaveAllConfigs()
-        
-        Rayfield:ChangeOption("HitboxToggle", config.enabled)
-        Rayfield:ChangeOption("SizeSlider", config.size)
-        Rayfield:ChangeOption("TransparencySlider", config.transparency)
-        updateConfigDropdown()
-        
-        Rayfield:Notify({
-            Title = "Configuration Reset",
-            Content = "Reset to default settings",
-            Duration = 3,
-            Image = 4483362458
-        })
-    end,
-})
-
--- Initialize dropdown
-updateConfigDropdown()
-
--- Load safe zones
-loadSafeZones()
+-- Clean up when players leave
+Players.PlayerRemoving:Connect(function(player)
+    if monitoredPlayers[player] then
+        resetHead(player)
+        monitoredPlayers[player] = nil
+    end
+end)
 
 -- Real-time monitoring
 RunService.Heartbeat:Connect(function()
     if config.enabled then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                applyHitbox(player)
-            end
+        for player, _ in pairs(monitoredPlayers) do
+            applyHitbox(player)
         end
     end
 end)
