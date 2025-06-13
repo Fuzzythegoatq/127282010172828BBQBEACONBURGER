@@ -79,19 +79,19 @@ local function shouldShowHitbox(player)
     if filters.forceIncludedPlayers[player.Name] then
         return true
     end
-    
+    
     -- Check player exclusions
     if filters.excludedPlayers[player.Name] then
         return false
     end
-    
+    
     -- Check team exclusions
     if player.Team then
         if filters.excludedTeams[player.Team.Name] then
             return false
         end
     end
-    
+    
     return true
 end
 
@@ -112,7 +112,7 @@ end
 -- Apply head hitbox
 local function applyHitbox(player)
     if player == LocalPlayer then return end
-    
+    
     -- Initialize monitoring if not already
     if not monitoredPlayers[player] then
         monitoredPlayers[player] = true
@@ -121,7 +121,7 @@ local function applyHitbox(player)
             task.wait(0.2)
             applyHitbox(player)
         end)
-        
+        
         if player.Character then
             task.delay(0.3, function()
                 applyHitbox(player)
@@ -207,12 +207,12 @@ local playerDropdown = FilterTab:CreateDropdown({
         for playerName, _ in pairs(filters.excludedPlayers) do
             filters.excludedPlayers[playerName] = nil
         end
-        
+        
         -- Set new exclusions
         for _, playerName in ipairs(Selected) do
             filters.excludedPlayers[playerName] = true
         end
-        
+        
         updateAllHitboxes()
     end,
 })
@@ -228,12 +228,12 @@ local teamDropdown = FilterTab:CreateDropdown({
         for teamName, _ in pairs(filters.excludedTeams) do
             filters.excludedTeams[teamName] = nil
         end
-        
+        
         -- Set new exclusions
         for _, teamName in ipairs(Selected) do
             filters.excludedTeams[teamName] = true
         end
-        
+        
         updateAllHitboxes()
     end,
 })
@@ -249,12 +249,12 @@ local forceIncludeDropdown = FilterTab:CreateDropdown({
         for playerName, _ in pairs(filters.forceIncludedPlayers) do
             filters.forceIncludedPlayers[playerName] = nil
         end
-        
+        
         -- Set new force includes
         for _, playerName in ipairs(Selected) do
             filters.forceIncludedPlayers[playerName] = true
         end
-        
+        
         updateAllHitboxes()
     end,
 })
