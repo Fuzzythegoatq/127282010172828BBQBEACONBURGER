@@ -4,7 +4,7 @@ local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 -- Initial notification
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "Universal Hitbox Expander",
-    Text = "Made By Corygunzjr",
+    Text = "Made By Corygunzjr (Multi-Hitbox Support)",
     Duration = 5
 })
 
@@ -12,7 +12,7 @@ game:GetService("StarterGui"):SetCore("SendNotification", {
 local Window = Rayfield:CreateWindow({
     Name = "Universal Hitbox Expander",
     LoadingTitle = "Loading HBE...",
-    LoadingSubtitle = "With Team/Player Selection",
+    LoadingSubtitle = "With Team/Player Selection & Multi-Hitbox",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "RayfieldHBE",
@@ -45,11 +45,31 @@ local filters = {
     excludedPlayers = {},
     excludedTeams = {},
     forceIncludedPlayers = {},
-    hideWhenSitting = false -- NEW
+    hideWhenSitting = false
+}
+
+-- Hitbox toggle config (default values)
+local hitboxToggles = {
+    Head = true,
+    ["Left Arm"] = false,
+    ["Right Arm"] = false,
+    ["Left Leg"] = false,
+    ["Right Leg"] = false,
+    Torso = false,
 }
 
 -- Player monitoring
 local monitoredPlayers = {}
+
+-- Mapping of hitbox type to body parts
+local hitboxPartsMap = {
+    Head = {"Head"},
+    ["Left Arm"] = {"LeftLowerArm", "LeftUpperArm"},
+    ["Right Arm"] = {"RightLowerArm", "RightUpperArm"},
+    ["Left Leg"] = {"LeftLowerLeg", "LeftUpperLeg"},
+    ["Right Leg"] = {"RightLowerLeg", "RightUpperLeg"},
+    Torso = {"Torso", "UpperTorso", "LowerTorso"}
+}
 
 -- Get all current teams
 local function getTeamList()
@@ -94,21 +114,45 @@ local function shouldShowHitbox(player)
     return true
 end
 
--- Reset head to normal
-local function resetHead(player)
-    if monitoredPlayers[player] then
-        local char = player.Character
-        if char and char:FindFirstChild("Head") then
-            local head = char.Head
-            head.Size = Vector3.new(2, 1, 1)
-            head.Transparency = 0
-            head.CanCollide = true
-            head.Massless = false
+-- Cache default properties so we can reset later
+local defaultProperties = {}
+
+local function cacheDefaults(character)
+    if not character then return end
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            if not defaultProperties[part.Name] then
+                defaultProperties[part.Name] = {
+                    Size = part.Size,
+                    Transparency = part.Transparency,
+                    CanCollide = part.CanCollide,
+                    Massless = part.Massless
+                }
+            end
         end
     end
 end
 
--- Apply head hitbox
+local function resetPart(part)
+    if not part then return end
+    local def = defaultProperties[part.Name]
+    if def then
+        part.Size = def.Size
+        part.Transparency = def.Transparency
+        part.CanCollide = def.CanCollide
+        part.Massless = def.Massless
+    end
+end
+
+local function applyToPart(part, size, transparency)
+    if not part then return end
+    part.Size = Vector3.new(size, size, size)
+    part.Transparency = transparency
+    part.CanCollide = false
+    part.Massless = true
+end
+
+-- Apply hitboxes based on toggles and filters
 local function applyHitbox(player)
     if player == LocalPlayer then return end
 
@@ -116,8 +160,8 @@ local function applyHitbox(player)
         monitoredPlayers[player] = true
 
         player.CharacterAdded:Connect(function(char)
-            char:WaitForChild("Head", 5)
-            local humanoid = char:WaitForChild("Humanoid", 5)
+            char:WaitForChild("Humanoid", 5)
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
             if humanoid then
                 humanoid:GetPropertyChangedSignal("Sit"):Connect(function()
                     applyHitbox(player)
@@ -128,7 +172,7 @@ local function applyHitbox(player)
         end)
 
         if player.Character then
-            local humanoid = player.Character:FindFirstChild("Humanoid")
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
             if humanoid then
                 humanoid:GetPropertyChangedSignal("Sit"):Connect(function()
                     applyHitbox(player)
@@ -143,26 +187,47 @@ local function applyHitbox(player)
     local char = player.Character
     if not char then return end
 
-    local head = char:FindFirstChild("Head")
-    local humanoid = char:FindFirstChild("Humanoid")
-
-    if not head or not humanoid or humanoid.Health <= 0 then
-        resetHead(player)
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then
+        -- Reset all parts on death
+        for hitboxType, partsList in pairs(hitboxPartsMap) do
+            for _, partName in ipairs(partsList) do
+                resetPart(char:FindFirstChild(partName))
+            end
+        end
         return
     end
 
     if not config.enabled or not shouldShowHitbox(player) then
-        resetHead(player)
+        -- Reset all parts when disabled or filtered out
+        for hitboxType, partsList in pairs(hitboxPartsMap) do
+            for _, partName in ipairs(partsList) do
+                resetPart(char:FindFirstChild(partName))
+            end
+        end
         return
     end
 
-    head.Size = Vector3.new(config.size, config.size, config.size)
-    head.Transparency = config.transparency
-    head.CanCollide = false
-    head.Massless = true
+    cacheDefaults(char)
+
+    for hitboxType, enabled in pairs(hitboxToggles) do
+        local partsList = hitboxPartsMap[hitboxType]
+        if enabled and partsList then
+            for _, partName in ipairs(partsList) do
+                applyToPart(char:FindFirstChild(partName), config.size, config.transparency)
+            end
+        else
+            -- Reset parts if disabled
+            if partsList then
+                for _, partName in ipairs(partsList) do
+                    resetPart(char:FindFirstChild(partName))
+                end
+            end
+        end
+    end
 end
 
--- Update all hitboxes
+-- Update all hitboxes for all monitored players
 local function updateAllHitboxes()
     for player, _ in pairs(monitoredPlayers) do
         applyHitbox(player)
@@ -170,6 +235,7 @@ local function updateAllHitboxes()
 end
 
 -- Main Tab UI Elements
+
 MainTab:CreateToggle({
     Name = "Enable Hitbox Expander",
     CurrentValue = config.enabled,
@@ -181,7 +247,7 @@ MainTab:CreateToggle({
 })
 
 MainTab:CreateSlider({
-    Name = "Head Size",
+    Name = "Hitbox Size",
     Range = {2, 200},
     Increment = 1,
     Suffix = "Size",
@@ -202,6 +268,39 @@ MainTab:CreateSlider({
     Flag = "TransparencySlider",
     Callback = function(Value)
         config.transparency = Value
+        updateAllHitboxes()
+    end,
+})
+
+-- Hitbox Parts Dropdown (replaces individual toggles)
+local hitboxPartsOptions = {}
+for partName, _ in pairs(hitboxToggles) do
+    table.insert(hitboxPartsOptions, partName)
+end
+
+-- Prepare default selected options based on current toggles
+local defaultSelected = {}
+for partName, enabled in pairs(hitboxToggles) do
+    if enabled then
+        table.insert(defaultSelected, partName)
+    end
+end
+
+MainTab:CreateDropdown({
+    Name = "Hitbox Parts",
+    Options = hitboxPartsOptions,
+    CurrentOption = defaultSelected,
+    MultipleOptions = true,
+    Flag = "HitboxPartsDropdown",
+    Callback = function(selectedParts)
+        -- Reset all to false
+        for partName, _ in pairs(hitboxToggles) do
+            hitboxToggles[partName] = false
+        end
+        -- Enable selected parts
+        for _, partName in ipairs(selectedParts) do
+            hitboxToggles[partName] = true
+        end
         updateAllHitboxes()
     end,
 })
@@ -298,7 +397,15 @@ end)
 -- Clean up when players leave
 Players.PlayerRemoving:Connect(function(player)
     if monitoredPlayers[player] then
-        resetHead(player)
+        -- Reset all hitboxes to default on player leave
+        local char = player.Character
+        if char then
+            for hitboxType, partsList in pairs(hitboxPartsMap) do
+                for _, partName in ipairs(partsList) do
+                    resetPart(char:FindFirstChild(partName))
+                end
+            end
+        end
         monitoredPlayers[player] = nil
     end
 end)
