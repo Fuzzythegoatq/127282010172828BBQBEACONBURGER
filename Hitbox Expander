@@ -32,6 +32,7 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Workspace = game:GetService("Workspace")
 local Teams = game:GetService("Teams")
+local HttpService = game:GetService("HttpService")
 
 -- Configuration system
 local config = {
@@ -45,8 +46,28 @@ local filters = {
     excludedPlayers = {},
     excludedTeams = {},
     forceIncludedPlayers = {},
-    hideWhenSitting = false
+    hideWhenSitting = false,
+    friendFilterEnabled = false
 }
+
+-- Friend list
+local friendUserIds = {}
+
+local function fetchFriends()
+    local success, response = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet(
+            "https://friends.roblox.com/v1/users/" .. LocalPlayer.UserId .. "/friends"))
+    end)
+
+    if success and response and response.data then
+        friendUserIds = {}
+        for _, friend in ipairs(response.data) do
+            friendUserIds[tonumber(friend.id)] = true
+        end
+    end
+end
+
+fetchFriends() -- Call it once on load
 
 -- Hitbox toggle config (default values)
 local hitboxToggles = {
@@ -110,6 +131,9 @@ local function shouldShowHitbox(player)
                 return false
             end
         end
+    end
+    if filters.friendFilterEnabled and friendUserIds[player.UserId] then
+        return false
     end
     return true
 end
@@ -189,7 +213,6 @@ local function applyHitbox(player)
 
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if not humanoid or humanoid.Health <= 0 then
-        -- Reset all parts on death
         for hitboxType, partsList in pairs(hitboxPartsMap) do
             for _, partName in ipairs(partsList) do
                 resetPart(char:FindFirstChild(partName))
@@ -199,7 +222,6 @@ local function applyHitbox(player)
     end
 
     if not config.enabled or not shouldShowHitbox(player) then
-        -- Reset all parts when disabled or filtered out
         for hitboxType, partsList in pairs(hitboxPartsMap) do
             for _, partName in ipairs(partsList) do
                 resetPart(char:FindFirstChild(partName))
@@ -217,7 +239,6 @@ local function applyHitbox(player)
                 applyToPart(char:FindFirstChild(partName), config.size, config.transparency)
             end
         else
-            -- Reset parts if disabled
             if partsList then
                 for _, partName in ipairs(partsList) do
                     resetPart(char:FindFirstChild(partName))
@@ -227,7 +248,7 @@ local function applyHitbox(player)
     end
 end
 
--- Update all hitboxes for all monitored players
+-- Update all hitboxes
 local function updateAllHitboxes()
     for player, _ in pairs(monitoredPlayers) do
         applyHitbox(player)
@@ -235,7 +256,6 @@ local function updateAllHitboxes()
 end
 
 -- Main Tab UI Elements
-
 MainTab:CreateToggle({
     Name = "Enable Hitbox Expander",
     CurrentValue = config.enabled,
@@ -272,13 +292,11 @@ MainTab:CreateSlider({
     end,
 })
 
--- Hitbox Parts Dropdown (replaces individual toggles)
 local hitboxPartsOptions = {}
 for partName, _ in pairs(hitboxToggles) do
     table.insert(hitboxPartsOptions, partName)
 end
 
--- Prepare default selected options based on current toggles
 local defaultSelected = {}
 for partName, enabled in pairs(hitboxToggles) do
     if enabled then
@@ -293,11 +311,9 @@ MainTab:CreateDropdown({
     MultipleOptions = true,
     Flag = "HitboxPartsDropdown",
     Callback = function(selectedParts)
-        -- Reset all to false
         for partName, _ in pairs(hitboxToggles) do
             hitboxToggles[partName] = false
         end
-        -- Enable selected parts
         for _, partName in ipairs(selectedParts) do
             hitboxToggles[partName] = true
         end
@@ -361,7 +377,17 @@ FilterTab:CreateToggle({
     end
 })
 
--- Update dropdowns when players/teams change
+FilterTab:CreateToggle({
+    Name = "Hide Friends' Hitboxes",
+    CurrentValue = filters.friendFilterEnabled,
+    Flag = "FriendFilterToggle",
+    Callback = function(Value)
+        filters.friendFilterEnabled = Value
+        updateAllHitboxes()
+    end
+})
+
+-- Dropdown refreshing
 Players.PlayerAdded:Connect(function()
     playerDropdown:Refresh(getPlayerList(), true)
     forceIncludeDropdown:Refresh(getPlayerList(), true)
@@ -380,24 +406,21 @@ Teams.ChildRemoved:Connect(function()
     teamDropdown:Refresh(getTeamList(), true)
 end)
 
--- Initialize monitoring for all players
+-- Player monitoring
 for _, player in ipairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         applyHitbox(player)
     end
 end
 
--- Monitor new players
 Players.PlayerAdded:Connect(function(player)
     if player ~= LocalPlayer then
         applyHitbox(player)
     end
 end)
 
--- Clean up when players leave
 Players.PlayerRemoving:Connect(function(player)
     if monitoredPlayers[player] then
-        -- Reset all hitboxes to default on player leave
         local char = player.Character
         if char then
             for hitboxType, partsList in pairs(hitboxPartsMap) do
@@ -410,7 +433,6 @@ Players.PlayerRemoving:Connect(function(player)
     end
 end)
 
--- Real-time monitoring
 RunService.Heartbeat:Connect(function()
     if config.enabled then
         for player, _ in pairs(monitoredPlayers) do
@@ -419,7 +441,6 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- Ensure UI visibility
 task.spawn(function()
     wait(1)
     if Rayfield then
@@ -432,7 +453,6 @@ task.spawn(function()
     end
 end)
 
--- UI toggle binding
 game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
     if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
         if Rayfield then
