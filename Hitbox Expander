@@ -25,6 +25,7 @@ local Window = Rayfield:CreateWindow({
 -- Create tabs
 local MainTab = Window:CreateTab("Hitbox Expander", 4483362458)
 local FilterTab = Window:CreateTab("Filters", 4483362458)
+local ScriptTab = Window:CreateTab("Script", 4483362458) -- NEW TAB
 
 -- Services
 local Players = game:GetService("Players")
@@ -32,7 +33,6 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Workspace = game:GetService("Workspace")
 local Teams = game:GetService("Teams")
-local HttpService = game:GetService("HttpService")
 
 -- Configuration system
 local config = {
@@ -47,27 +47,8 @@ local filters = {
     excludedTeams = {},
     forceIncludedPlayers = {},
     hideWhenSitting = false,
-    friendFilterEnabled = false
+    hideFriends = false -- NEW FRIENDS FILTER
 }
-
--- Friend list
-local friendUserIds = {}
-
-local function fetchFriends()
-    local success, response = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet(
-            "https://friends.roblox.com/v1/users/" .. LocalPlayer.UserId .. "/friends"))
-    end)
-
-    if success and response and response.data then
-        friendUserIds = {}
-        for _, friend in ipairs(response.data) do
-            friendUserIds[tonumber(friend.id)] = true
-        end
-    end
-end
-
-fetchFriends() -- Call it once on load
 
 -- Hitbox toggle config (default values)
 local hitboxToggles = {
@@ -92,7 +73,6 @@ local hitboxPartsMap = {
     Torso = {"Torso", "UpperTorso", "LowerTorso"}
 }
 
--- Get all current teams
 local function getTeamList()
     local teamList = {}
     for _, team in ipairs(Teams:GetTeams()) do
@@ -101,7 +81,6 @@ local function getTeamList()
     return teamList
 end
 
--- Get all players (excluding local player)
 local function getPlayerList()
     local playerList = {}
     for _, player in ipairs(Players:GetPlayers()) do
@@ -112,7 +91,13 @@ local function getPlayerList()
     return playerList
 end
 
--- Check if player should have hitbox
+local function isFriend(player)
+    local success, result = pcall(function()
+        return LocalPlayer:IsFriendsWith(player.UserId)
+    end)
+    return success and result
+end
+
 local function shouldShowHitbox(player)
     if filters.forceIncludedPlayers[player.Name] then
         return true
@@ -121,6 +106,9 @@ local function shouldShowHitbox(player)
         return false
     end
     if player.Team and filters.excludedTeams[player.Team.Name] then
+        return false
+    end
+    if filters.hideFriends and isFriend(player) then
         return false
     end
     if filters.hideWhenSitting then
@@ -132,13 +120,9 @@ local function shouldShowHitbox(player)
             end
         end
     end
-    if filters.friendFilterEnabled and friendUserIds[player.UserId] then
-        return false
-    end
     return true
 end
 
--- Cache default properties so we can reset later
 local defaultProperties = {}
 
 local function cacheDefaults(character)
@@ -176,7 +160,6 @@ local function applyToPart(part, size, transparency)
     part.Massless = true
 end
 
--- Apply hitboxes based on toggles and filters
 local function applyHitbox(player)
     if player == LocalPlayer then return end
 
@@ -213,7 +196,7 @@ local function applyHitbox(player)
 
     local humanoid = char:FindFirstChildOfClass("Humanoid")
     if not humanoid or humanoid.Health <= 0 then
-        for hitboxType, partsList in pairs(hitboxPartsMap) do
+        for _, partsList in pairs(hitboxPartsMap) do
             for _, partName in ipairs(partsList) do
                 resetPart(char:FindFirstChild(partName))
             end
@@ -222,7 +205,7 @@ local function applyHitbox(player)
     end
 
     if not config.enabled or not shouldShowHitbox(player) then
-        for hitboxType, partsList in pairs(hitboxPartsMap) do
+        for _, partsList in pairs(hitboxPartsMap) do
             for _, partName in ipairs(partsList) do
                 resetPart(char:FindFirstChild(partName))
             end
@@ -248,14 +231,12 @@ local function applyHitbox(player)
     end
 end
 
--- Update all hitboxes
 local function updateAllHitboxes()
     for player, _ in pairs(monitoredPlayers) do
         applyHitbox(player)
     end
 end
 
--- Main Tab UI Elements
 MainTab:CreateToggle({
     Name = "Enable Hitbox Expander",
     CurrentValue = config.enabled,
@@ -321,7 +302,6 @@ MainTab:CreateDropdown({
     end,
 })
 
--- Filter Tab UI Elements
 local playerDropdown = FilterTab:CreateDropdown({
     Name = "Exclude Players",
     Options = getPlayerList(),
@@ -378,22 +358,40 @@ FilterTab:CreateToggle({
 })
 
 FilterTab:CreateToggle({
-    Name = "Hide Friends' Hitboxes",
-    CurrentValue = filters.friendFilterEnabled,
-    Flag = "FriendFilterToggle",
+    Name = "Hide Hitbox for Friends",
+    CurrentValue = filters.hideFriends,
+    Flag = "HideFriendsToggle",
     Callback = function(Value)
-        filters.friendFilterEnabled = Value
+        filters.hideFriends = Value
         updateAllHitboxes()
     end
 })
 
--- Dropdown refreshing
+-- New Script Tab Button
+ScriptTab:CreateButton({
+    Name = "Load Shiftlock Script",
+    Callback = function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/prosadaf/Example/refs/heads/main/Video"))()
+    end,
+})
+
 Players.PlayerAdded:Connect(function()
     playerDropdown:Refresh(getPlayerList(), true)
     forceIncludeDropdown:Refresh(getPlayerList(), true)
 end)
 
-Players.PlayerRemoving:Connect(function()
+Players.PlayerRemoving:Connect(function(player)
+    if monitoredPlayers[player] then
+        local char = player.Character
+        if char then
+            for _, partsList in pairs(hitboxPartsMap) do
+                for _, partName in ipairs(partsList) do
+                    resetPart(char:FindFirstChild(partName))
+                end
+            end
+        end
+        monitoredPlayers[player] = nil
+    end
     playerDropdown:Refresh(getPlayerList(), true)
     forceIncludeDropdown:Refresh(getPlayerList(), true)
 end)
@@ -406,7 +404,6 @@ Teams.ChildRemoved:Connect(function()
     teamDropdown:Refresh(getTeamList(), true)
 end)
 
--- Player monitoring
 for _, player in ipairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         applyHitbox(player)
@@ -416,20 +413,6 @@ end
 Players.PlayerAdded:Connect(function(player)
     if player ~= LocalPlayer then
         applyHitbox(player)
-    end
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-    if monitoredPlayers[player] then
-        local char = player.Character
-        if char then
-            for hitboxType, partsList in pairs(hitboxPartsMap) do
-                for _, partName in ipairs(partsList) do
-                    resetPart(char:FindFirstChild(partName))
-                end
-            end
-        end
-        monitoredPlayers[player] = nil
     end
 end)
 
