@@ -237,6 +237,7 @@ local function updateAllHitboxes()
     end
 end
 
+-- UI Elements - MainTab
 MainTab:CreateToggle({
     Name = "Enable Hitbox Expander",
     CurrentValue = config.enabled,
@@ -302,6 +303,7 @@ MainTab:CreateDropdown({
     end,
 })
 
+-- FilterTab
 local playerDropdown = FilterTab:CreateDropdown({
     Name = "Exclude Players",
     Options = getPlayerList(),
@@ -367,7 +369,7 @@ FilterTab:CreateToggle({
     end
 })
 
--- New Script Tab Buttons
+-- ScriptTab Buttons
 ScriptTab:CreateButton({
     Name = "Load Shiftlock Script",
     Callback = function()
@@ -382,6 +384,14 @@ ScriptTab:CreateButton({
     end,
 })
 
+ScriptTab:CreateButton({
+    Name = "Load Adonis Bypasser",
+    Callback = function()
+        loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-Adonis-Admin-Anti-Crash-18757"))()
+    end,
+})
+
+-- Player/Team Events
 Players.PlayerAdded:Connect(function()
     playerDropdown:Refresh(getPlayerList(), true)
     forceIncludeDropdown:Refresh(getPlayerList(), true)
