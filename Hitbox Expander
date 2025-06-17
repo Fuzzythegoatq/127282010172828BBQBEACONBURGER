@@ -48,7 +48,7 @@ local filters = {
     forceIncludedPlayers = {},
     hideWhenSitting = false,
     hideFriends = false,
-    hideForceField = false -- NEW FORCEFIELD FILTER
+    hideForceField = false
 }
 
 -- Hitbox toggle config
@@ -422,6 +422,19 @@ ScriptTab:CreateButton({
     Name = "Load Adonis Bypasser",
     Callback = function()
         loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-Adonis-Admin-Anti-Crash-18757"))()
+    end,
+})
+
+ScriptTab:CreateButton({
+    Name = "Load Abcde Bypasser",
+    Callback = function()
+        game:GetService("RunService").Heartbeat:Connect(function()
+            task.wait(0.1)
+            local char = game.Players.LocalPlayer.Character
+            if char and char:FindFirstChild("abcde") then
+                char.abcde:Destroy()
+            end
+        end)
     end,
 })
 
