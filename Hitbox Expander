@@ -367,11 +367,18 @@ FilterTab:CreateToggle({
     end
 })
 
--- New Script Tab Button
+-- New Script Tab Buttons
 ScriptTab:CreateButton({
     Name = "Load Shiftlock Script",
     Callback = function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/prosadaf/Example/refs/heads/main/Video"))()
+    end,
+})
+
+ScriptTab:CreateButton({
+    Name = "Load Infinite Yield",
+    Callback = function()
+        loadstring(game:HttpGet('https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source'))()
     end,
 })
 
