@@ -25,7 +25,7 @@ local Window = Rayfield:CreateWindow({
 -- Create tabs
 local MainTab = Window:CreateTab("Hitbox Expander", 4483362458)
 local FilterTab = Window:CreateTab("Filters", 4483362458)
-local ScriptTab = Window:CreateTab("Script", 4483362458) -- NEW TAB
+local ScriptTab = Window:CreateTab("Script", 4483362458)
 
 -- Services
 local Players = game:GetService("Players")
@@ -47,10 +47,11 @@ local filters = {
     excludedTeams = {},
     forceIncludedPlayers = {},
     hideWhenSitting = false,
-    hideFriends = false -- NEW FRIENDS FILTER
+    hideFriends = false,
+    hideForceField = false -- NEW FORCEFIELD FILTER
 }
 
--- Hitbox toggle config (default values)
+-- Hitbox toggle config
 local hitboxToggles = {
     Head = true,
     ["Left Arm"] = false,
@@ -111,13 +112,16 @@ local function shouldShowHitbox(player)
     if filters.hideFriends and isFriend(player) then
         return false
     end
-    if filters.hideWhenSitting then
-        local char = player.Character
-        if char then
+    local char = player.Character
+    if char then
+        if filters.hideWhenSitting then
             local humanoid = char:FindFirstChildOfClass("Humanoid")
             if humanoid and humanoid.Sit then
                 return false
             end
+        end
+        if filters.hideForceField and char:FindFirstChildOfClass("ForceField") then
+            return false
         end
     end
     return true
@@ -174,6 +178,16 @@ local function applyHitbox(player)
                     applyHitbox(player)
                 end)
             end
+            char.ChildAdded:Connect(function(child)
+                if child:IsA("ForceField") then
+                    applyHitbox(player)
+                end
+            end)
+            char.ChildRemoved:Connect(function(child)
+                if child:IsA("ForceField") then
+                    applyHitbox(player)
+                end
+            end)
             task.wait(0.2)
             applyHitbox(player)
         end)
@@ -185,6 +199,16 @@ local function applyHitbox(player)
                     applyHitbox(player)
                 end)
             end
+            player.Character.ChildAdded:Connect(function(child)
+                if child:IsA("ForceField") then
+                    applyHitbox(player)
+                end
+            end)
+            player.Character.ChildRemoved:Connect(function(child)
+                if child:IsA("ForceField") then
+                    applyHitbox(player)
+                end
+            end)
             task.delay(0.3, function()
                 applyHitbox(player)
             end)
@@ -237,7 +261,7 @@ local function updateAllHitboxes()
     end
 end
 
--- UI Elements - MainTab
+-- MainTab Controls
 MainTab:CreateToggle({
     Name = "Enable Hitbox Expander",
     CurrentValue = config.enabled,
@@ -369,6 +393,16 @@ FilterTab:CreateToggle({
     end
 })
 
+FilterTab:CreateToggle({
+    Name = "Hide Hitbox for Players with ForceField",
+    CurrentValue = filters.hideForceField,
+    Flag = "HideForceFieldToggle",
+    Callback = function(Value)
+        filters.hideForceField = Value
+        updateAllHitboxes()
+    end
+})
+
 -- ScriptTab Buttons
 ScriptTab:CreateButton({
     Name = "Load Shiftlock Script",
@@ -391,7 +425,7 @@ ScriptTab:CreateButton({
     end,
 })
 
--- Player/Team Events
+-- Events
 Players.PlayerAdded:Connect(function()
     playerDropdown:Refresh(getPlayerList(), true)
     forceIncludeDropdown:Refresh(getPlayerList(), true)
