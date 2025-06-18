@@ -438,6 +438,24 @@ ScriptTab:CreateButton({
     end,
 })
 
+-- New Instant Proximity Button
+ScriptTab:CreateButton({
+    Name = "Load Instant Proximity",
+    Callback = function()
+        local ProximityPromptHoldDuration = 0  -- how long it will take to activate ProximityPrompt
+        local ChangedObjects = {}
+
+        for _, ProximityObject in ipairs(workspace:GetDescendants()) do
+            if ProximityObject:IsA("ProximityPrompt") then
+                -- cache the original hold duration (optional, if you want to restore later)
+                ChangedObjects[ProximityObject] = ProximityObject.HoldDuration
+                -- set to instant
+                ProximityObject.HoldDuration = ProximityPromptHoldDuration
+            end
+        end
+    end,
+})
+
 -- Events
 Players.PlayerAdded:Connect(function()
     playerDropdown:Refresh(getPlayerList(), true)
