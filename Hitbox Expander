@@ -38,7 +38,10 @@ local Teams = game:GetService("Teams")
 local config = {
     size = 5,
     transparency = 0.5,
-    enabled = false
+    enabled = false,
+    npcEnabled = false,
+    npcSize = 5,          -- Added NPC size
+    npcTransparency = 0.5 -- Added NPC transparency
 }
 
 -- Filter system
@@ -63,6 +66,7 @@ local hitboxToggles = {
 
 -- Player monitoring
 local monitoredPlayers = {}
+local monitoredNPCs = {}  -- Track NPC models
 
 -- Mapping of hitbox type to body parts
 local hitboxPartsMap = {
@@ -133,8 +137,8 @@ local function cacheDefaults(character)
     if not character then return end
     for _, part in pairs(character:GetChildren()) do
         if part:IsA("BasePart") then
-            if not defaultProperties[part.Name] then
-                defaultProperties[part.Name] = {
+            if not defaultProperties[part] then
+                defaultProperties[part] = {
                     Size = part.Size,
                     Transparency = part.Transparency,
                     CanCollide = part.CanCollide,
@@ -147,7 +151,7 @@ end
 
 local function resetPart(part)
     if not part then return end
-    local def = defaultProperties[part.Name]
+    local def = defaultProperties[part]
     if def then
         part.Size = def.Size
         part.Transparency = def.Transparency
@@ -156,12 +160,69 @@ local function resetPart(part)
     end
 end
 
-local function applyToPart(part, size, transparency)
+local function applyToPart(part, size, transparency, isNPC)
     if not part then return end
-    part.Size = Vector3.new(size, size, size)
-    part.Transparency = transparency
+    local actualSize = isNPC and config.npcSize or size
+    local actualTransparency = isNPC and config.npcTransparency or transparency
+    part.Size = Vector3.new(actualSize, actualSize, actualSize)
+    part.Transparency = actualTransparency
     part.CanCollide = false
     part.Massless = true
+end
+
+-- Function to apply hitbox to NPCs
+local function applyNPCHitbox(model)
+    if not model then return end
+    
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then
+        -- Reset parts when dead
+        for _, partsList in pairs(hitboxPartsMap) do
+            for _, partName in ipairs(partsList) do
+                local part = model:FindFirstChild(partName)
+                if part then
+                    resetPart(part)
+                end
+            end
+        end
+        return
+    end
+
+    if not config.enabled or not config.npcEnabled then
+        -- Reset parts if disabled
+        for _, partsList in pairs(hitboxPartsMap) do
+            for _, partName in ipairs(partsList) do
+                local part = model:FindFirstChild(partName)
+                if part then
+                    resetPart(part)
+                end
+            end
+        end
+        return
+    end
+
+    cacheDefaults(model)
+
+    for hitboxType, enabled in pairs(hitboxToggles) do
+        local partsList = hitboxPartsMap[hitboxType]
+        if enabled and partsList then
+            for _, partName in ipairs(partsList) do
+                local part = model:FindFirstChild(partName)
+                if part then
+                    applyToPart(part, config.size, config.transparency, true)
+                end
+            end
+        else
+            if partsList then
+                for _, partName in ipairs(partsList) do
+                    local part = model:FindFirstChild(partName)
+                    if part then
+                        resetPart(part)
+                    end
+                end
+            end
+        end
+    end
 end
 
 local function applyHitbox(player)
@@ -222,7 +283,10 @@ local function applyHitbox(player)
     if not humanoid or humanoid.Health <= 0 then
         for _, partsList in pairs(hitboxPartsMap) do
             for _, partName in ipairs(partsList) do
-                resetPart(char:FindFirstChild(partName))
+                local part = char:FindFirstChild(partName)
+                if part then
+                    resetPart(part)
+                end
             end
         end
         return
@@ -231,7 +295,10 @@ local function applyHitbox(player)
     if not config.enabled or not shouldShowHitbox(player) then
         for _, partsList in pairs(hitboxPartsMap) do
             for _, partName in ipairs(partsList) do
-                resetPart(char:FindFirstChild(partName))
+                local part = char:FindFirstChild(partName)
+                if part then
+                    resetPart(part)
+                end
             end
         end
         return
@@ -243,12 +310,18 @@ local function applyHitbox(player)
         local partsList = hitboxPartsMap[hitboxType]
         if enabled and partsList then
             for _, partName in ipairs(partsList) do
-                applyToPart(char:FindFirstChild(partName), config.size, config.transparency)
+                local part = char:FindFirstChild(partName)
+                if part then
+                    applyToPart(part, config.size, config.transparency, false)
+                end
             end
         else
             if partsList then
                 for _, partName in ipairs(partsList) do
-                    resetPart(char:FindFirstChild(partName))
+                    local part = char:FindFirstChild(partName)
+                    if part then
+                        resetPart(part)
+                    end
                 end
             end
         end
@@ -259,6 +332,65 @@ local function updateAllHitboxes()
     for player, _ in pairs(monitoredPlayers) do
         applyHitbox(player)
     end
+    for model, _ in pairs(monitoredNPCs) do
+        applyNPCHitbox(model)
+    end
+end
+
+-- Improved NPC Monitoring System
+local function setupNPCMonitoring()
+    local function monitorNPC(model)
+        if monitoredNPCs[model] then return end
+        monitoredNPCs[model] = true
+        
+        local humanoid = model:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            -- Handle death and respawn
+            local function onHealthChanged()
+                applyNPCHitbox(model)
+            end
+            
+            humanoid:GetPropertyChangedSignal("Health"):Connect(onHealthChanged)
+            humanoid.Died:Connect(function()
+                applyNPCHitbox(model)
+            end)
+        end
+        
+        -- Handle model removal
+        model.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                monitoredNPCs[model] = nil
+            end
+        end)
+        
+        -- Handle respawn (new model created)
+        model.Destroying:Connect(function()
+            monitoredNPCs[model] = nil
+        end)
+        
+        applyNPCHitbox(model)
+    end
+
+    -- Function to check if a model should be treated as an NPC
+    local function isNPC(model)
+        return model:IsA("Model") and 
+               model:FindFirstChildOfClass("Humanoid") and
+               not Players:GetPlayerFromCharacter(model)
+    end
+
+    -- Monitor existing NPCs
+    for _, model in ipairs(Workspace:GetDescendants()) do
+        if isNPC(model) then
+            monitorNPC(model)
+        end
+    end
+
+    -- Monitor for new NPCs
+    Workspace.DescendantAdded:Connect(function(descendant)
+        if isNPC(descendant) then
+            monitorNPC(descendant)
+        end
+    end)
 end
 
 -- MainTab Controls
@@ -272,6 +404,18 @@ MainTab:CreateToggle({
     end,
 })
 
+MainTab:CreateToggle({
+    Name = "Enable NPC Hitboxes",
+    CurrentValue = config.npcEnabled,
+    Flag = "NPCToggle",
+    Callback = function(Value)
+        config.npcEnabled = Value
+        updateAllHitboxes()
+    end,
+})
+
+-- Player Hitbox Settings
+MainTab:CreateLabel("Player Settings")
 MainTab:CreateSlider({
     Name = "Hitbox Size",
     Range = {2, 200},
@@ -294,6 +438,34 @@ MainTab:CreateSlider({
     Flag = "TransparencySlider",
     Callback = function(Value)
         config.transparency = Value
+        updateAllHitboxes()
+    end,
+})
+
+-- NPC Hitbox Settings
+MainTab:CreateLabel("NPC Settings")
+MainTab:CreateSlider({
+    Name = "NPC Hitbox Size",
+    Range = {2, 200},
+    Increment = 1,
+    Suffix = "Size",
+    CurrentValue = config.npcSize,
+    Flag = "NPCSizeSlider",
+    Callback = function(Value)
+        config.npcSize = Value
+        updateAllHitboxes()
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "NPC Transparency",
+    Range = {0, 1},
+    Increment = 0.05,
+    Suffix = "",
+    CurrentValue = config.npcTransparency,
+    Flag = "NPCTransparencySlider",
+    Callback = function(Value)
+        config.npcTransparency = Value
         updateAllHitboxes()
     end,
 })
@@ -438,18 +610,15 @@ ScriptTab:CreateButton({
     end,
 })
 
--- New Instant Proximity Button
 ScriptTab:CreateButton({
     Name = "Load Instant Proximity",
     Callback = function()
-        local ProximityPromptHoldDuration = 0  -- how long it will take to activate ProximityPrompt
+        local ProximityPromptHoldDuration = 0
         local ChangedObjects = {}
 
         for _, ProximityObject in ipairs(workspace:GetDescendants()) do
             if ProximityObject:IsA("ProximityPrompt") then
-                -- cache the original hold duration (optional, if you want to restore later)
                 ChangedObjects[ProximityObject] = ProximityObject.HoldDuration
-                -- set to instant
                 ProximityObject.HoldDuration = ProximityPromptHoldDuration
             end
         end
@@ -468,7 +637,10 @@ Players.PlayerRemoving:Connect(function(player)
         if char then
             for _, partsList in pairs(hitboxPartsMap) do
                 for _, partName in ipairs(partsList) do
-                    resetPart(char:FindFirstChild(partName))
+                    local part = char:FindFirstChild(partName)
+                    if part then
+                        resetPart(part)
+                    end
                 end
             end
         end
@@ -498,10 +670,18 @@ Players.PlayerAdded:Connect(function(player)
     end
 end)
 
+-- Initialize NPC monitoring
+setupNPCMonitoring()
+
 RunService.Heartbeat:Connect(function()
     if config.enabled then
         for player, _ in pairs(monitoredPlayers) do
             applyHitbox(player)
+        end
+        if config.npcEnabled then
+            for model, _ in pairs(monitoredNPCs) do
+                applyNPCHitbox(model)
+            end
         end
     end
 end)
